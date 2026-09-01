@@ -246,3 +246,126 @@ async def share_video(video_id: str) -> None:
     result = await db.videos.update_one({"_id": ObjectId(video_id)}, {"$inc": {"shares_count": 1}})
     if result.matched_count == 0:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Video not found")
+# ==========================================
+# 1. SEARCH ENDPOINT
+# ==========================================
+@router.get("/search/query", response_model=list[VideoPublic])
+async def search_videos(
+    q: str,
+    skip: int = 0,
+    limit: int = 10,
+    viewer_id: Optional[str] = Depends(get_optional_user_id),
+):
+  """Search videos by caption or title."""
+  db = get_db()
+  limit = min(limit, 50)
+
+  # Text ya caption me match karne ke liye regex search
+  query_filter = {
+      "$or": [
+          {"caption": {"$regex": q, "$options": "i"}},
+          {"title": {"$regex": q, "$options": "i"}},
+      ]
+  }
+
+  docs = (
+      await db.videos.find(query_filter)
+      .sort("created_at", -1)
+      .skip(skip)
+      .limit(limit)
+      .to_list(limit)
+  )
+
+  results = [await _serialize_video(d, viewer_id) for d in docs]
+  return [r for r in results if r]
+
+# ==========================================
+# 2. VIEW COUNT ENDPOINT
+# ==========================================
+@router.post("/{video_id}/view", status_code=status.HTTP_200_OK)
+async def increment_video_view(video_id: str):
+  """Increment the view count of a video by 1."""
+  if not ObjectId.is_valid(video_id):
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND, detail="Video not found"
+    )
+
+  db = get_db()
+  result = await db.videos.update_one(
+      {"_id": ObjectId(video_id)}, {"$inc": {"views_count": 1}}
+  )
+
+  if result.matched_count == 0:
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND, detail="Video not found"
+    )
+
+  return {"success": True, "message": "View counted"}
+
+# ==========================================
+# 3. COMMENTS ENDPOINTS (Add & Get)
+# ==========================================
+@router.post("/{video_id}/comments", status_code=status.HTTP_201_CREATED)
+async def add_comment(
+    video_id: str,
+    comment_data: dict,
+    current_user: str = Depends(get_current_user_id),
+):
+  """Add a comment to a video."""
+  if not ObjectId.is_valid(video_id):
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND, detail="Video not found"
+    )
+
+  db = get_db()
+  video = await db.videos.find_one({"_id": ObjectId(video_id)})
+  if not video:
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND, detail="Video not found"
+    )
+
+  comment_doc = {
+      "video_id": video_id,
+      "user_id": str(current_user),
+      "text": comment_data.get("text"),
+      "created_at": datetime.now(timezone.utc),
+  }
+
+  result = await db.comments.insert_one(comment_doc)
+
+  # Video document me comments_count badhana
+  await db.videos.update_one(
+      {"_id": ObjectId(video_id)}, {"$inc": {"comments_count": 1}}
+  )
+
+  return {
+      "success": True,
+      "comment_id": str(result.inserted_id),
+      "message": "Comment added successfully",
+  }
+
+@router.get("/{video_id}/comments", response_model=list)
+async def get_video_comments(video_id: str, skip: int = 0, limit: int = 20):
+  """Get all comments for a specific video."""
+  if not ObjectId.is_valid(video_id):
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND, detail="Video not found"
+    )
+
+  db = get_db()
+  limit = min(limit, 50)
+
+  cursor = (
+      db.comments.find({"video_id": video_id})
+      .sort("created_at", -1)
+      .skip(skip)
+      .limit(limit)
+  )
+  comments = await cursor.to_list(limit)
+
+  # ObjectId ko string me convert karna padta hai frontend ke liye
+  for c in comments:
+    c["_id"] = str(c["_id"])
+
+  return comments
+    
