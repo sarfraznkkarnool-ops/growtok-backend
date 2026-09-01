@@ -100,6 +100,36 @@ async def get_video(video_id: str, viewer_id: Optional[str] = Depends(get_option
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Video not found")
     return result
 
+CLOUDINARY_CLOUD_NAME = "c-46ceef3b679b"
+CLOUDINARY_UPLOAD_PRESET = "growtok_upload"
+
+
+@router.post("/upload")
+async def upload_video_to_cloudinary(file: UploadFile = File(...)):
+  url = (
+      f"https://api.cloudinary.com/v1_1/{CLOUDINARY_CLOUD_NAME}/video/upload"
+  )
+  try:
+    file_bytes = await file.read()
+    data = {"upload_preset": CLOUDINARY_UPLOAD_PRESET}
+    files = {"file": (file.filename, file_bytes, file.content_type)}
+
+    async with httpx.AsyncClient() as client:
+      response = await client.post(url, data=data, files=files)
+
+    if response.status_code != 200:
+      raise HTTPException(
+          status_code=500, detail="Cloudinary upload fail ho gaya!"
+      )
+
+    result = response.json()
+    return {
+        "success": True,
+        "video_url": result.get("secure_url"),
+        "public_id": result.get("public_id"),
+    }
+  except Exception as e:
+    raise HTTPException(status_code=500, detail=str(e))
 
 # ---------------------------------------------------------------------------
 # Upload (single + batch)
