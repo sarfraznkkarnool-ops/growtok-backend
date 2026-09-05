@@ -105,6 +105,7 @@ CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME", "ueafcc9y")
 CLOUDINARY_UPLOAD_PRESET = os.getenv("CLOUDINARY_UPLOAD_PRESET", "growtok_upload")
 
 @router.post("/upload")
+@router.post("")
 async def upload_video_to_cloudinary(file: UploadFile = File(...)):
     url = f"https://api.cloudinary.com/v1_1/{CLOUDINARY_CLOUD_NAME}/video/upload"
     try:
